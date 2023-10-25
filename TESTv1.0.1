@@ -1,0 +1,204 @@
+@isTest
+private class BrokerProfileHelperTEST {
+    
+    static testMethod void compileTest() {
+        List<Account> prospectTestList = new List<Account>();
+        List<Account> brAcctTestList = new List<Account>();
+        List<Contact> prodConTestList = new List<Contact>();
+        List<Opportunity> oppTestList = new List<Opportunity>();
+        List<Broker_Profile__c> brProfTestList = new List<Broker_Profile__c>();
+        
+        Account a = new Account();
+        a.Name = 'testA';
+        a.OwnerId = '005C0000006AKGbIAO';
+        a.Program_Type__c = 'TreePro';
+        prospectTestList.add(a);
+        
+        Account b = new Account();
+        b.Name = 'testC';
+        b.OwnerId = '005C0000006AKGbIAO';
+        b.Program_Type__c = 'LandPro';
+        prospectTestList.add(b);
+        
+        Account z = new Account();
+        z.Name = 'testAgencyZ';
+        z.OwnerId = '005C0000006AKGbIAO';
+        z.RecordTypeId = System.Label.BrokerAccountRTId18;
+        brAcctTestList.add(z);
+        
+        Account y = new Account();
+        y.Name = 'testAgencyY';
+        y.OwnerId = '005C0000006AKGbIAO';
+        y.RecordTypeId = System.Label.BrokerAccountRTId18;
+        brAcctTestList.add(y);
+        
+        insert brAcctTestList;
+        
+        Contact producerZ = new Contact();
+        producerZ.FirstName = 'testLeroyZ';
+        producerZ.LastName = 'testJenkinsZ';
+        producerZ.AccountId = z.Id;
+        producerZ.RecordTypeId = System.Label.BrokerContactRTId18;
+        producerZ.OwnerId = '005C0000006AKGbIAO';
+        prodConTestList.add(producerZ);
+        
+        Contact producerY = new Contact();
+        producerY.FirstName = 'testLeroyY';
+        producerY.LastName = 'testJenkinsY';
+        producerY.AccountId = y.Id;
+        producerY.RecordTypeId = System.Label.BrokerContactRTId18;
+        producerY.OwnerId = '005C0000006AKGbIAO';
+        prodConTestList.add(producerY);
+        
+        insert prodConTestList;
+        
+        for (Account brAcct : brAcctTestList) {
+            Broker_Profile__c brProf = new Broker_Profile__c();
+            brProf.Agency__c = brAcct.Id;
+            brProf.RecordTypeId = [SELECT Id FROM RecordType WHERE SObjectType = 'Broker_Profile__c' AND Name = 'NIP Programs'].Id;
+            brProfTestList.add(brProf);
+        }
+        insert brProfTestList;        
+        insert prospectTestList;
+        
+        for (Account acct : prospectTestList) {
+            Integer x = 0;
+            Datetime yesterday = Datetime.now().addDays(-1);
+            
+            do {
+                Opportunity opp = new Opportunity();
+                opp.AccountId = acct.Id;
+                opp.TestRecord__c = true;
+                opp.Amount = 500.00 * x;
+                opp.CloseDate = Date.today();
+                opp.Name = 'test_' + acct.Name + '_' + x;
+                opp.RecordTypeId = [SELECT Id FROM RecordType WHERE SObjectType = 'Opportunity' AND Name = 'NIP Programs'].Id;
+                
+                if (x < 2) {
+                    opp.OwnerId = z.OwnerId;
+                    opp.Submitting_Agency__c = z.Id;
+                    opp.Producer_Contact__c = producerZ.Id;
+                    if (x == 0) 
+                        opp.StageName = 'Closed Won';                    
+                    if (x == 1)
+                        opp.StageName = 'BOR';
+                } else {
+                    opp.OwnerId = y.OwnerId;
+                    opp.Submitting_Agency__c = y.Id;
+                    opp.Producer_Contact__c = producerY.Id;
+                    if (x == 2) 
+                        opp.StageName = 'Closed Won';                    
+                    if (x == 3)
+                        opp.StageName = 'BOR';
+                }
+                
+                oppTestList.add(opp);
+                x++;
+            } while (x < 4);
+        }
+        insert oppTestList;
+        
+        List<BrokerProfileHelper.Request> helperReqList = new List<BrokerProfileHelper.Request>();
+        for (Broker_Profile__c brProf : brProfTestList) {
+            List<Opportunity> brOpps = [SELECT Id, Amount, Account_Program_Type__c, Submitting_Agency__c, CreatedDate, CloseDate, Name, Closed_Won_Opportunity_LEGACY__c FROM Opportunity WHERE Submitting_Agency__c = :brProf.Agency__c AND Id IN :oppTestList];
+            Integer count = 1;
+            
+            do {
+                if (count == 1) {
+                    BrokerProfileHelper.Request helperReq = new BrokerProfileHelper.Request();
+                    helperReq.brOpps = brOpps;
+                    helperReq.processNumber = count;
+                    helperReqList.add(helperReq);
+                } else if (count == 2) {
+                    List<Opportunity> createdIntervalOpps = brOpps;
+                    List<Opportunity> wonIntervalOpps = [SELECT Id, Amount FROM Opportunity WHERE Closed_Won_Opportunity_LEGACY__c = true AND Id IN :brOpps];
+                    for (Integer i = 1; i <= count; i++) {
+                        BrokerProfileHelper.Request helperReq = new BrokerProfileHelper.Request();
+                        helperReq.createdIntervalOpps = createdIntervalOpps;
+                        helperReq.wonIntervalOpps = wonIntervalOpps;
+                        helperReq.processNumber = count;
+                        if (i == 1)
+                            helperReq.programType = 'TreePro';
+                        
+                        if (i == 2)
+                            helperReq.programType = 'SitePro';
+                        
+                        helperReqList.add(helperReq);
+                    }
+                } else if (count == 3) {
+                    BrokerProfileHelper.Request helperReq = new BrokerProfileHelper.Request();
+                    helperReq.brProfId = brProf.Id;
+                    helperReq.processNumber = count;
+                    helperReq.brOpps = brOpps;
+                    
+                    helperReqList.add(helperReq);
+                }
+                count++;
+            } while (count < 4);
+        }
+        
+        System.debug('helperReqList: ' + helperReqList);
+        Datetime yesterday = Datetime.now().addDays(-1);
+        for (Opportunity opp : oppTestList) {
+            Test.setCreatedDate(opp.id, yesterday);
+        }
+        
+        
+        test.startTest();
+        /*
+        // Calling schedulable class method to test
+        BrokerProfileDailyHandler sch = new BrokerProfileDailyHandler();
+        sch.execute(null);
+        System.debug('DailyHandler class: ' + sch);
+    */
+        
+        List<BrokerProfileHelper.Result> resList = new List<BrokerProfileHelper.Result>();
+        BrokerProfileHelper.compile(helperReqList);
+        for (BrokerProfileHelper.Request req : helperReqList) {
+            if (req.processNumber == 1)
+                resList.add(BrokerProfileHelper.proc1(req.startDate, req.brOpps));
+            if (req.processNumber == 2)
+                resList.add(BrokerProfileHelper.proc2(req.programType, req.createdIntervalOpps, req.wonIntervalOpps));
+            if (req.processNumber == 3)
+                BrokerProfileHelper.proc3(req.brProfId, req.brOpps);
+        }
+        test.stopTest();
+        
+        // Fetch Broker Account and Broker Profile
+        Set<Id> brAcctSet = new Set<Id>();
+        String recTypeId = [SELECT Id FROM RecordType WHERE SObjectType = 'Broker_Profile__c' AND Name = 'NIP Programs'].Id;
+        List<Broker_Profile__c> brProfList = new List<Broker_Profile__c>();
+        for (Opportunity opp : oppTestList) {
+            if (!brAcctSet.contains(opp.Submitting_Agency__c)) {
+                brAcctSet.add(opp.Submitting_Agency__c);
+                brProfList.add(new Broker_Profile__c(Agency__c = opp.Submitting_Agency__c, RecordTypeId = recTypeId, Name = opp.Name));
+            }
+        }
+        
+        List<Opportunity> proc1CreatedOutput = resList[0].createdIntervalOpps;
+        List<Opportunity> proc1WonOutput = resList[0].wonIntervalOpps;
+        
+        List<String> proc2Output1 = resList[1].intervalStrings;
+        List<String> proc2Output2 = resList[2].intervalStrings;
+        
+        List<Broker_Profiles_Opportunities__c> proc3Output = [SELECT Id, Broker_Profile__c, Opportunity__c FROM Broker_Profiles_Opportunities__c WHERE Opportunity__c IN :oppTestList];
+        
+        System.debug('brProfList: ' + brProfList);
+        System.debug('brProfList.size' + brProfList.size());
+        
+        System.debug('proc1CreatedOutput: ' + proc1CreatedOutput);
+        System.debug('proc1CreatedOutput.size: ' + proc1CreatedOutput.size());
+        
+        System.debug('proc1WonOutput: ' + proc1WonOutput);
+        System.debug('proc1WonOutput.size: ' + proc1WonOutput.size());
+        
+        System.debug('proc2Output1: ' + proc2Output1);
+        System.debug('proc2Output1.size: ' + proc2Output1.size());
+        
+        System.debug('proc2Output2: ' + proc2Output2);
+        System.debug('proc2Output2.size: ' + proc2Output2.size());
+        
+        System.debug('proc3Output: ' + proc3Output);
+        System.debug('proc3Output.size: ' + proc3Output.size());
+    }
+}
