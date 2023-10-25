@@ -1,0 +1,162 @@
+public class BrokerProfileHelper {    
+    
+    @InvocableMethod
+    public Static List<Result> compile(List<Request> requestList) {
+        List<Result> resultsWrapper = new List<Result>();
+        System.debug('requestList.size: ' + requestList.size());
+        for (Request request : requestList) {
+            Integer processNum = request.processNumber;
+            List<Opportunity> brOpps = request.brOpps != null ? request.brOpps : new List<Opportunity>();            
+            
+            if (processNum == 1) {
+                // Return Interval Opportunity List
+                System.debug('proc1Request: ' + request);
+                resultsWrapper.add(proc1(request.startDate, brOpps));
+            } else if (processNum == 2) {
+                System.debug('proc2Request: ' + request);
+                resultsWrapper.add(proc2(request.programType, request.createdIntervalOpps, request.wonIntervalOpps));
+            } else if (processNum == 3) {
+                proc3(request.brProfId, brOpps);
+            }
+        }
+        return resultsWrapper;
+    }
+    
+    
+    public static Result proc1(Date startDate, List<Opportunity> brOpps) {
+        List<Opportunity> intOppsCreated = [SELECT Id FROM Opportunity WHERE CreatedDate >= :startDate AND Id IN :brOpps];
+        Result outputRes = new Result();
+        
+        if (!intOppsCreated.isEmpty()) {
+            outputRes.createdIntervalOpps = intOppsCreated;
+        } else {
+            outputRes.createdIntervalOpps = new List<Opportunity>();
+        }
+        
+        List<Opportunity> intOppsWon = [SELECT Id, Amount FROM Opportunity WHERE CloseDate >= :startDate AND Closed_Won_Opportunity_LEGACY__c = true AND Id IN :brOpps];
+        if (!intOppsWon.isEmpty()) {
+            outputRes.wonIntervalOpps = intOppsWon;
+        } else {
+            outputRes.wonIntervalOpps = new List<Opportunity>();
+        }
+        return outputRes;
+    }
+
+    
+    public static Result proc2(String progType, List<Opportunity> createdIntervalOpps, List<Opportunity> wonIntervalOpps) {
+        Decimal progAmount = 0.00;
+        List<String> intStrings = new List<String>();
+
+        if (!createdIntervalOpps.isEmpty()) {
+            List<Opportunity> createdProgOpps = [SELECT Id FROM Opportunity WHERE Account_Program_Type__c = :progType AND Id IN :createdIntervalOpps];
+            intStrings.add('Total Submissions: ' + createdProgOpps.size());
+        } else {
+            intStrings.add('Total Submissions: 0');
+        }
+        
+        if (!wonIntervalOpps.isEmpty()) {
+            List<Opportunity> wonProgOpps = [SELECT Id, Amount FROM Opportunity WHERE Account_Program_Type__c = :progType AND Id IN :wonIntervalOpps];
+            if (!wonProgOpps.isEmpty()) {
+                for (Opportunity opp : wonProgOpps) {
+                    Decimal oppAmount = opp.Amount != null ? opp.Amount : 0.00;
+                    progAmount += oppAmount;
+                }
+                intStrings.add('Total Won Submissions: ' + wonProgOpps.size());
+                intStrings.add('Total Won Premium Amount: $' + getCents(progAmount));
+            } else {
+                intStrings.add('Total Won Submissions: 0');
+                intStrings.add('Total Won Premium Amount: $0.00');
+            }
+        } 
+ 
+        Result output = new Result();
+        output.intervalStrings = intStrings;
+        output.progWonAmount = progAmount;
+        return output;        
+    }
+        
+        
+    public static void proc3(String brProfId, List<Opportunity> brOpps) {
+        List<Broker_Profiles_Opportunities__c> juncObjList = new List<Broker_Profiles_Opportunities__c>();
+        Result result = new Result();
+
+        if (brOpps.size() > 0) {
+            for (Opportunity opp : brOpps) {
+                Broker_Profiles_Opportunities__c juncObj = new Broker_Profiles_Opportunities__c();
+                juncObj.Opportunity__c = opp.Id;
+                juncObj.Broker_Profile__c = brProfId;
+                //*juncObj.Program_Type__c = opp.Account_Program_Type__c;
+                juncObj.Name = opp.Name;
+
+                juncObjList.add(juncObj);
+            }            
+            result.juncObjList = juncObjList;
+            insert juncObjList;
+        }
+        System.debug('proc3Result: ' + result);
+    }
+    
+    
+    private static String getCents(Decimal x) {
+        String y = String.valueOf(x);
+        String z = '.';
+        if (y.contains(',')) z = ',';
+        y = y.substring(0, y.indexOf(z));
+        if (x - Decimal.valueOf(y) == 0)
+            return String.valueOf(x.format()) + z + '00';
+        else return String.valueOf(x.format());
+    }
+    
+    
+    public class Request {
+        
+        @InvocableVariable
+        public String brokerAcctId;
+        
+        @InvocableVariable
+        public Date startDate;
+        
+        @InvocableVariable
+        public Integer processNumber;
+        
+        @InvocableVariable
+        public String programType;
+        
+        @InvocableVariable
+        public List<Opportunity> brOpps;
+        
+        @InvocableVariable
+        public String brProfId;
+        
+        @InvocableVariable(label='Created Interval Opportunities')
+        public List<Opportunity> createdIntervalOpps;
+        
+        @InvocableVariable(label='Won Interval Opportunities')
+        public List<Opportunity> wonIntervalOpps;
+    }
+    
+    
+    public class Result {
+
+        @InvocableVariable(label='intervalStrings')
+        public List<String> intervalStrings;
+        
+        @InvocableVariable(label='Created Interval Opportunities')
+        public List<Opportunity> createdIntervalOpps;
+        
+        @InvocableVariable(label='Won Interval Opportunities')
+        public List<Opportunity> wonIntervalOpps;
+        
+        @InvocableVariable(label='Program Won Amount')
+        public Decimal progWonAmount;
+        
+        @InvocableVariable(label='Junction Objects')
+        public List<Broker_Profiles_Opportunities__c> juncObjList;
+        
+        @InvocableVariable
+        public Date startDate;
+        
+        @InvocableVariable
+        public String progType;
+    }
+}
